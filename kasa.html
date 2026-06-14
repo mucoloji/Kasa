@@ -13,7 +13,6 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-
   const firebaseConfig = {
     apiKey: "AIzaSyDyhwPphm0oBNOwis0eZ_o73_TFxT5Cmio",
     authDomain: "kasa-aile.firebaseapp.com",
@@ -23,11 +22,9 @@
     messagingSenderId: "398301472665",
     appId: "1:398301472665:web:5ae2627deb9e81afa25508"
   };
-
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
   const kasaRef = ref(db, 'kasa');
-
   window.__firebase = {
     listen: (cb) => onValue(kasaRef, snap => cb(snap.val())),
     save: (data) => set(kasaRef, data)
@@ -37,7 +34,7 @@
 </script>
 <style>
 * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-body { margin: 0; background: #020617; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+body { margin: 0; background: #080810; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
 ::-webkit-scrollbar { width: 0; }
 </style>
@@ -47,21 +44,20 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
 <script type="text/babel">
 const { useState, useEffect, useCallback, useRef } = React;
 
-const fmtIQD = n => Number(n).toLocaleString('tr-TR',{minimumFractionDigits:0,maximumFractionDigits:0}) + ' IQD';
+// ── HELPERS ──────────────────────────────────────────────────────────────────
 const fmtUSD = n => '$' + Number(n).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtIQD = n => Number(n).toLocaleString('tr-TR',{minimumFractionDigits:0,maximumFractionDigits:0})+' IQD';
 const todayStr = () => new Date().toISOString().split('T')[0];
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2);
 const fmtDate = d => { if(!d) return ''; const [y,m,day]=d.split('-'); return `${day}.${m}.${y}`; };
+const thisMonth = () => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; };
+const monthLabel = ym => { if(!ym) return ''; const [y,m]=ym.split('-'); const names=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']; return names[parseInt(m)-1]+' '+y; };
 const KISILER = ['Mücahit','Münir','Baba'];
 
 const INITIAL = {
   karPaylari: [],
   islemler: [],
-  borclar: {
-    'Mücahit': { toplam: 0, gecmis: [] },
-    'Münir':   { toplam: 0, gecmis: [] },
-    'Baba':    { toplam: 0, gecmis: [] },
-  }
+  borclar: { 'Mücahit':{toplam:0,gecmis:[]}, 'Münir':{toplam:0,gecmis:[]}, 'Baba':{toplam:0,gecmis:[]} }
 };
 
 function computeKasa(state) {
@@ -69,72 +65,57 @@ function computeKasa(state) {
   const cikan = (state.islemler||[]).filter(i=>i.tur!=='borc_odeme').reduce((s,i)=>s+i.usd,0);
   return giren - cikan;
 }
-function computeTotals(state) {
-  return {
-    toplamGiren: (state.karPaylari||[]).reduce((s,k)=>s+k.usd,0),
-    toplamCikan: (state.islemler||[]).filter(i=>i.tur!=='borc_odeme').reduce((s,i)=>s+i.usd,0)
-  };
-}
-function buAyIst(state) {
-  const now = new Date();
-  const ay = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  return {
-    giren: (state.karPaylari||[]).filter(k=>k.tarih.startsWith(ay)).reduce((s,k)=>s+k.usd,0),
-    cikan: (state.islemler||[]).filter(i=>i.tarih.startsWith(ay)&&i.tur!=='borc_odeme').reduce((s,i)=>s+i.usd,0)
-  };
-}
 
+// ── REDUCER ──────────────────────────────────────────────────────────────────
 function reducer(state, action) {
   switch(action.type) {
     case 'LOAD': return action.payload;
-    case 'ADD_KAR': return { ...state, karPaylari: [...(state.karPaylari||[]), action.payload] };
-    case 'DEL_KAR': return { ...state, karPaylari: (state.karPaylari||[]).filter(k=>k.id!==action.payload) };
+    case 'ADD_KAR': return { ...state, karPaylari:[...(state.karPaylari||[]),action.payload] };
+    case 'DEL_KAR': return { ...state, karPaylari:(state.karPaylari||[]).filter(k=>k.id!==action.payload) };
     case 'ADD_ISLEM': {
-      const { id, tarih, kisi, tur, parabirimi, miktar, aciklama } = action.payload;
-      const DEFAULT_KUR = 1480;
-      const usd = parabirimi==='USD' ? miktar : miktar/DEFAULT_KUR;
-      const iqd = parabirimi==='IQD' ? miktar : miktar*DEFAULT_KUR;
-      const girenUSD = (state.karPaylari||[]).reduce((s,k)=>s+k.usd,0);
-      const cikanUSD = (state.islemler||[]).filter(i=>i.tur!=='borc_odeme').reduce((s,i)=>s+i.usd,0);
-      const kasaBakiye = girenUSD - cikanUSD - (tur!=='borc_odeme' ? usd : 0);
-      const islem = { id, tarih, kisi, tur, parabirimi, miktar, usd, iqd, aciklama, kasaBakiye };
-      const islemler = [...(state.islemler||[]), islem];
-      let borclar = { ...(state.borclar||{}) };
-      if(!borclar[kisi]) borclar[kisi] = {toplam:0,gecmis:[]};
-      if (tur==='borc') {
-        const toplam = borclar[kisi].toplam + usd;
-        borclar[kisi] = { toplam, gecmis: [...borclar[kisi].gecmis, {id,tarih,miktar:usd,aciklama,kalan:toplam,tur}] };
-      } else if (tur==='borc_odeme') {
-        const toplam = Math.max(0, borclar[kisi].toplam - usd);
-        borclar[kisi] = { toplam, gecmis: [...borclar[kisi].gecmis, {id,tarih,miktar:usd,aciklama,kalan:toplam,tur}] };
+      const { id,tarih,kisi,tur,parabirimi,miktar,aciklama } = action.payload;
+      const usd = parabirimi==='USD'?miktar:miktar/1480;
+      const iqd = parabirimi==='IQD'?miktar:miktar*1480;
+      const girenUSD=(state.karPaylari||[]).reduce((s,k)=>s+k.usd,0);
+      const cikanUSD=(state.islemler||[]).filter(i=>i.tur!=='borc_odeme').reduce((s,i)=>s+i.usd,0);
+      const kasaBakiye=girenUSD-cikanUSD-(tur!=='borc_odeme'?usd:0);
+      const islem={id,tarih,kisi,tur,parabirimi,miktar,usd,iqd,aciklama,kasaBakiye};
+      const islemler=[...(state.islemler||[]),islem];
+      let borclar={...(state.borclar||{})};
+      if(!borclar[kisi]) borclar[kisi]={toplam:0,gecmis:[]};
+      if(tur==='borc'){
+        const toplam=borclar[kisi].toplam+usd;
+        borclar[kisi]={toplam,gecmis:[...borclar[kisi].gecmis,{id,tarih,miktar:usd,aciklama,kalan:toplam,tur}]};
+      } else if(tur==='borc_odeme'){
+        const toplam=Math.max(0,borclar[kisi].toplam-usd);
+        borclar[kisi]={toplam,gecmis:[...borclar[kisi].gecmis,{id,tarih,miktar:usd,aciklama,kalan:toplam,tur}]};
       }
-      return { ...state, islemler, borclar };
+      return {...state,islemler,borclar};
     }
     case 'DEL_ISLEM': {
-      const islem = (state.islemler||[]).find(i=>i.id===action.payload);
+      const islem=(state.islemler||[]).find(i=>i.id===action.payload);
       if(!islem) return state;
-      const islemler = (state.islemler||[]).filter(i=>i.id!==action.payload);
-      let borclar = { ...(state.borclar||{}) };
-      if (islem.tur==='borc'||islem.tur==='borc_odeme') {
-        const prev = borclar[islem.kisi]||{toplam:0,gecmis:[]};
-        const gecmis = prev.gecmis.filter(g=>g.id!==action.payload);
-        const toplam = gecmis.length>0 ? gecmis[gecmis.length-1].kalan : 0;
-        borclar[islem.kisi] = { toplam, gecmis };
+      const islemler=(state.islemler||[]).filter(i=>i.id!==action.payload);
+      let borclar={...(state.borclar||{})};
+      if(islem.tur==='borc'||islem.tur==='borc_odeme'){
+        const prev=borclar[islem.kisi]||{toplam:0,gecmis:[]};
+        const gecmis=prev.gecmis.filter(g=>g.id!==action.payload);
+        borclar[islem.kisi]={toplam:gecmis.length>0?gecmis[gecmis.length-1].kalan:0,gecmis};
       }
-      return { ...state, islemler, borclar };
+      return {...state,islemler,borclar};
     }
     default: return state;
   }
 }
 
-// ── UI ATOMS ──────────────────────────────────────────────────────────────────
+// ── ATOMS ────────────────────────────────────────────────────────────────────
 function Modal({ title, onClose, children }) {
   return (
-    <div style={{position:'fixed',inset:0,zIndex:50,display:'flex',alignItems:'flex-end',justifyContent:'center',background:'rgba(0,0,0,0.75)',backdropFilter:'blur(4px)'}}>
-      <div style={{background:'#0f172a',border:'1px solid #334155',borderRadius:'20px 20px 0 0',width:'100%',maxWidth:480,maxHeight:'90vh',overflowY:'auto'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'16px 20px',borderBottom:'1px solid #1e293b'}}>
-          <span style={{color:'#f59e0b',fontWeight:700,fontSize:17}}>{title}</span>
-          <button onClick={onClose} style={{color:'#94a3b8',fontSize:28,background:'none',border:'none',cursor:'pointer',lineHeight:1,padding:'0 4px'}}>×</button>
+    <div style={{position:'fixed',inset:0,zIndex:50,display:'flex',alignItems:'flex-end',justifyContent:'center',background:'rgba(0,0,0,0.82)',backdropFilter:'blur(6px)'}}>
+      <div style={{background:'#10101a',border:'1px solid #252535',borderRadius:'22px 22px 0 0',width:'100%',maxWidth:480,maxHeight:'92vh',overflowY:'auto'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'16px 20px',borderBottom:'1px solid #1a1a28'}}>
+          <span style={{color:'#818cf8',fontWeight:700,fontSize:17}}>{title}</span>
+          <button onClick={onClose} style={{color:'#64748b',fontSize:28,background:'none',border:'none',cursor:'pointer',lineHeight:1}}>×</button>
         </div>
         <div style={{padding:'20px'}}>{children}</div>
       </div>
@@ -143,13 +124,13 @@ function Modal({ title, onClose, children }) {
 }
 function Confirm({ msg, onYes, onNo }) {
   return (
-    <div style={{position:'fixed',inset:0,zIndex:60,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.85)',padding:'24px'}}>
-      <div style={{background:'#1e293b',border:'1px solid rgba(239,68,68,0.4)',borderRadius:20,padding:24,maxWidth:320,width:'100%',textAlign:'center'}}>
-        <div style={{fontSize:36,marginBottom:12}}>⚠️</div>
-        <p style={{color:'#e2e8f0',marginBottom:24,lineHeight:1.5}}>{msg}</p>
-        <div style={{display:'flex',gap:12,justifyContent:'center'}}>
-          <button onClick={onNo} style={{padding:'10px 20px',borderRadius:12,border:'1px solid #475569',color:'#cbd5e1',background:'none',cursor:'pointer',fontSize:15}}>İptal</button>
-          <button onClick={onYes} style={{padding:'10px 20px',borderRadius:12,border:'none',background:'#dc2626',color:'white',cursor:'pointer',fontSize:15,fontWeight:700}}>Sil</button>
+    <div style={{position:'fixed',inset:0,zIndex:60,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.9)',padding:'24px'}}>
+      <div style={{background:'#14141f',border:'1px solid rgba(239,68,68,0.4)',borderRadius:20,padding:24,maxWidth:300,width:'100%',textAlign:'center'}}>
+        <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
+        <p style={{color:'#e2e8f0',marginBottom:24,lineHeight:1.5,fontSize:14}}>{msg}</p>
+        <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+          <button onClick={onNo} style={{padding:'10px 18px',borderRadius:12,border:'1px solid #334155',color:'#94a3b8',background:'none',cursor:'pointer',fontSize:14}}>İptal</button>
+          <button onClick={onYes} style={{padding:'10px 18px',borderRadius:12,border:'none',background:'#dc2626',color:'white',cursor:'pointer',fontSize:14,fontWeight:700}}>Sil</button>
         </div>
       </div>
     </div>
@@ -157,117 +138,155 @@ function Confirm({ msg, onYes, onNo }) {
 }
 function Field({ label, children }) {
   return (
-    <div style={{marginBottom:16}}>
-      <label style={{display:'block',fontSize:11,color:'#64748b',marginBottom:6,textTransform:'uppercase',letterSpacing:'0.1em'}}>{label}</label>
+    <div style={{marginBottom:14}}>
+      <label style={{display:'block',fontSize:10,color:'#64748b',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.12em'}}>{label}</label>
       {children}
     </div>
   );
 }
-const IS = {width:'100%',background:'#1e293b',border:'1px solid #475569',borderRadius:12,padding:'12px 16px',color:'#f1f5f9',fontSize:16,outline:'none',boxSizing:'border-box'};
+const IS = {width:'100%',background:'#1a1a28',border:'1px solid #2d2d45',borderRadius:12,padding:'12px 14px',color:'#f1f5f9',fontSize:16,outline:'none',boxSizing:'border-box'};
+
 function TurBadge({ tur }) {
-  const map = {
-    kar:        ['Kâr Payı','#166534','#4ade80','#14532d'],
-    harcama:    ['Harcama','#7f1d1d','#f87171','#450a0a'],
-    borc:       ['Borç','#7c2d12','#fb923c','#431407'],
-    borc_odeme: ['Ödeme','#1e3a5f','#60a5fa','#172554'],
-  };
-  const [label,bg,color,border] = map[tur]||['—','#1e293b','#94a3b8','#334155'];
-  return <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:bg,color,border:`1px solid ${border}`,fontWeight:600}}>{label}</span>;
+  const map={kar:['Kâr Payı','#166534','#4ade80'],harcama:['Harcama','#7f1d1d','#f87171'],borc:['Borç','#7c2d12','#fb923c'],borc_odeme:['Ödeme','#1e3a5f','#60a5fa']};
+  const [label,bg,color]=map[tur]||['—','#1e293b','#94a3b8'];
+  return <span style={{fontSize:10,padding:'2px 8px',borderRadius:99,background:bg,color,fontWeight:700,letterSpacing:'0.03em'}}>{label}</span>;
 }
 
-// ── DASHBOARD ─────────────────────────────────────────────────────────────────
-function Dashboard({ state, onPage }) {
+function IslemKart({ i, onSil }) {
+  const isGiren = i.tur==='kar'||i.tur==='borc_odeme';
+  const kat = i.kategori ? {emoji:'📦'} : null;
+  return (
+    <div style={{background:'rgba(16,16,26,0.9)',border:'1px solid #1e1e30',borderRadius:16,padding:14,marginBottom:10}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+        <div style={{flex:1}}>
+          <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:5,flexWrap:'wrap'}}>
+            <TurBadge tur={i.tur}/>
+            {i.kisi&&i.kisi!=='—'&&<span style={{color:'#cbd5e1',fontSize:12,fontWeight:600}}>{i.kisi}</span>}
+            <span style={{color:'#334155',fontSize:11}}>{fmtDate(i.tarih)}</span>
+          </div>
+          <div style={{color:isGiren?'#4ade80':'#f87171',fontWeight:800,fontSize:18,letterSpacing:'-0.01em'}}>
+            {isGiren?'+':'-'}{fmtUSD(i.usd)}
+          </div>
+          {i.parabirimi==='IQD'&&<div style={{color:'#334155',fontSize:11,marginTop:1}}>{fmtIQD(i.iqd)}</div>}
+          {(i.aciklama||i.not)&&<div style={{color:'#64748b',fontSize:12,marginTop:4}}>{i.aciklama||i.not}</div>}
+          {i.kasaBakiye!==undefined&&<div style={{color:'#252535',fontSize:10,marginTop:3}}>Kasa: {fmtUSD(i.kasaBakiye)}</div>}
+        </div>
+        {onSil&&<button onClick={onSil} style={{background:'none',border:'none',cursor:'pointer',color:'#252535',fontSize:18,padding:'2px 0 2px 8px',flexShrink:0}}>🗑</button>}
+      </div>
+    </div>
+  );
+}
+
+// ── DASHBOARD ────────────────────────────────────────────────────────────────
+function Dashboard({ state, onPage, onIslem }) {
   const kasaUSD = computeKasa(state);
-  const { toplamGiren, toplamCikan } = computeTotals(state);
-  const buAy = buAyIst(state);
-  const neg = kasaUSD < 0;
-  const islemler = state.islemler||[];
-  const karPaylari = state.karPaylari||[];
-  const borclar = state.borclar||{};
+  const neg = kasaUSD<0;
+  const toplamGiren=(state.karPaylari||[]).reduce((s,k)=>s+k.usd,0);
+  const toplamCikan=(state.islemler||[]).filter(i=>i.tur!=='borc_odeme').reduce((s,i)=>s+i.usd,0);
+  const ay=thisMonth();
+  const ayGiren=(state.karPaylari||[]).filter(k=>k.tarih.startsWith(ay)).reduce((s,k)=>s+k.usd,0);
+  const ayCikan=(state.islemler||[]).filter(i=>i.tarih.startsWith(ay)&&i.tur!=='borc_odeme').reduce((s,i)=>s+i.usd,0);
+  const sonlar=[...(state.islemler||[])].sort((a,b)=>b.tarih.localeCompare(a.tarih)).slice(0,4);
+  const borclar=state.borclar||{};
 
   return (
     <div>
-      <div style={{borderRadius:20,padding:20,border:`1px solid ${neg?'rgba(239,68,68,0.5)':'rgba(245,158,11,0.3)'}`,background:neg?'rgba(127,29,29,0.2)':'rgba(120,53,15,0.15)',marginBottom:16}}>
-        <div style={{fontSize:11,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:4}}>Kasa Bakiyesi</div>
-        <div style={{fontSize:40,fontWeight:800,color:neg?'#f87171':'#f59e0b',letterSpacing:'-0.02em'}}>{fmtUSD(kasaUSD)}</div>
-        {neg && <div style={{color:'#f87171',fontSize:13,marginTop:6}}>⚠ Negatif bakiye!</div>}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginTop:16}}>
-          <div style={{background:'rgba(15,23,42,0.6)',borderRadius:12,padding:12}}>
-            <div style={{fontSize:11,color:'#64748b',marginBottom:4}}>Toplam Giren</div>
-            <div style={{color:'#4ade80',fontWeight:700}}>{fmtUSD(toplamGiren)}</div>
+      {/* Ana Kasa Kartı */}
+      <div style={{borderRadius:22,padding:22,background:neg?'linear-gradient(135deg,#2d0a0a,#10101a)':'linear-gradient(135deg,#0f0a2e,#10101a)',border:`1px solid ${neg?'rgba(239,68,68,0.4)':'rgba(129,140,248,0.3)'}`,marginBottom:14}}>
+        <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:6}}>Kasa Bakiyesi</div>
+        <div style={{fontSize:44,fontWeight:800,color:neg?'#f87171':'#818cf8',letterSpacing:'-0.03em',lineHeight:1}}>{fmtUSD(kasaUSD)}</div>
+        {neg&&<div style={{color:'#f87171',fontSize:12,marginTop:6,display:'flex',alignItems:'center',gap:4}}>⚠ Negatif bakiye!</div>}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:16}}>
+          <div style={{background:'rgba(8,8,16,0.5)',borderRadius:14,padding:12}}>
+            <div style={{fontSize:10,color:'#475569',marginBottom:3}}>Toplam Giren</div>
+            <div style={{color:'#4ade80',fontWeight:700,fontSize:15}}>{fmtUSD(toplamGiren)}</div>
           </div>
-          <div style={{background:'rgba(15,23,42,0.6)',borderRadius:12,padding:12}}>
-            <div style={{fontSize:11,color:'#64748b',marginBottom:4}}>Toplam Çıkan</div>
-            <div style={{color:'#f87171',fontWeight:700}}>{fmtUSD(toplamCikan)}</div>
+          <div style={{background:'rgba(8,8,16,0.5)',borderRadius:14,padding:12}}>
+            <div style={{fontSize:10,color:'#475569',marginBottom:3}}>Toplam Çıkan</div>
+            <div style={{color:'#f87171',fontWeight:700,fontSize:15}}>{fmtUSD(toplamCikan)}</div>
           </div>
         </div>
       </div>
 
-      <div style={{background:'rgba(30,41,59,0.5)',border:'1px solid rgba(51,65,85,0.5)',borderRadius:20,padding:16,marginBottom:16}}>
-        <div style={{fontSize:11,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:12}}>Bu Ay</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-          <div><div style={{fontSize:11,color:'#64748b',marginBottom:2}}>Giriş</div><div style={{color:'#4ade80',fontWeight:700}}>{fmtUSD(buAy.giren)}</div></div>
-          <div><div style={{fontSize:11,color:'#64748b',marginBottom:2}}>Çıkış</div><div style={{color:'#f87171',fontWeight:700}}>{fmtUSD(buAy.cikan)}</div></div>
+      {/* Bu Ay */}
+      <div style={{background:'rgba(16,16,26,0.8)',border:'1px solid #1e1e30',borderRadius:18,padding:16,marginBottom:14}}>
+        <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:12}}>{monthLabel(ay)}</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <div><div style={{fontSize:10,color:'#475569',marginBottom:3}}>Giriş</div><div style={{color:'#4ade80',fontWeight:700,fontSize:15}}>{fmtUSD(ayGiren)}</div></div>
+          <div><div style={{fontSize:10,color:'#475569',marginBottom:3}}>Çıkış</div><div style={{color:'#f87171',fontWeight:700,fontSize:15}}>{fmtUSD(ayCikan)}</div></div>
         </div>
       </div>
 
-      <div style={{background:'rgba(30,41,59,0.5)',border:'1px solid rgba(51,65,85,0.5)',borderRadius:20,padding:16,marginBottom:16}}>
-        <div style={{fontSize:11,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:12}}>Borç Durumu</div>
-        {KISILER.map(k => {
-          const borc = borclar[k]?.toplam||0;
+      {/* Borç Durumu */}
+      <div style={{background:'rgba(16,16,26,0.8)',border:'1px solid #1e1e30',borderRadius:18,padding:16,marginBottom:14}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.12em'}}>Borç Durumu</div>
+          <button onClick={()=>onPage('borcTakip')} style={{fontSize:11,color:'#818cf8',background:'none',border:'none',cursor:'pointer'}}>Detay →</button>
+        </div>
+        {KISILER.map(k=>{
+          const borc=borclar[k]?.toplam||0;
           return (
-            <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid rgba(51,65,85,0.3)'}}>
-              <span style={{color:'#cbd5e1',fontWeight:600}}>{k}</span>
-              <span style={{color:borc>0?'#fb923c':'#475569',fontWeight:borc>0?700:400}}>{borc>0?fmtUSD(borc)+' borçlu':'Borç yok'}</span>
+            <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 0',borderBottom:'1px solid rgba(30,30,48,0.8)'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{width:32,height:32,borderRadius:10,background:'rgba(129,140,248,0.1)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:700,color:'#818cf8'}}>
+                  {k[0]}
+                </div>
+                <span style={{color:'#cbd5e1',fontWeight:600,fontSize:13}}>{k}</span>
+              </div>
+              <span style={{color:borc>0?'#fb923c':'#334155',fontWeight:borc>0?700:400,fontSize:13}}>{borc>0?fmtUSD(borc)+' borçlu':'Borç yok'}</span>
             </div>
           );
         })}
       </div>
 
-      <div style={{background:'rgba(30,41,59,0.5)',border:'1px solid rgba(51,65,85,0.5)',borderRadius:20,padding:16,marginBottom:16}}>
-        <div style={{fontSize:11,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:12}}>Son İşlemler</div>
-        {islemler.length===0
-          ? <div style={{color:'#475569',textAlign:'center',padding:'12px 0'}}>Henüz işlem yok</div>
-          : [...islemler].sort((a,b)=>b.tarih.localeCompare(a.tarih)).slice(0,5).map(i=>(
-            <div key={i.id} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'8px 0',borderBottom:'1px solid rgba(51,65,85,0.3)'}}>
+      {/* Hızlı işlem butonları */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
+        <button onClick={()=>onIslem('kar')} style={{background:'linear-gradient(135deg,rgba(22,101,52,0.4),rgba(16,16,26,0.8))',border:'1px solid rgba(74,222,128,0.25)',borderRadius:16,padding:16,cursor:'pointer',textAlign:'left'}}>
+          <div style={{fontSize:26,marginBottom:6}}>💰</div>
+          <div style={{color:'#4ade80',fontWeight:700,fontSize:13}}>Kâr Payı Gir</div>
+        </button>
+        <button onClick={()=>onIslem('cekme')} style={{background:'linear-gradient(135deg,rgba(124,58,237,0.2),rgba(16,16,26,0.8))',border:'1px solid rgba(129,140,248,0.25)',borderRadius:16,padding:16,cursor:'pointer',textAlign:'left'}}>
+          <div style={{fontSize:26,marginBottom:6}}>💸</div>
+          <div style={{color:'#818cf8',fontWeight:700,fontSize:13}}>Para Çek / Harca</div>
+        </button>
+      </div>
+
+      {/* Son İşlemler */}
+      <div style={{background:'rgba(16,16,26,0.8)',border:'1px solid #1e1e30',borderRadius:18,padding:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.12em'}}>Son İşlemler</div>
+          <button onClick={()=>onPage('gecmis')} style={{fontSize:11,color:'#818cf8',background:'none',border:'none',cursor:'pointer'}}>Tümü →</button>
+        </div>
+        {sonlar.length===0
+          ? <div style={{color:'#252535',textAlign:'center',padding:'16px 0',fontSize:13}}>Henüz işlem yok</div>
+          : sonlar.map(i=>(
+            <div key={i.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 0',borderBottom:'1px solid rgba(30,30,48,0.6)'}}>
               <div>
-                <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:3}}><TurBadge tur={i.tur}/><span style={{color:'#cbd5e1',fontSize:13}}>{i.kisi}</span></div>
-                <div style={{color:'#64748b',fontSize:12}}>{fmtDate(i.tarih)} · {i.aciklama}</div>
+                <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:3}}><TurBadge tur={i.tur}/><span style={{color:'#94a3b8',fontSize:12}}>{i.kisi}</span></div>
+                <div style={{color:'#334155',fontSize:11}}>{fmtDate(i.tarih)} · {i.aciklama}</div>
               </div>
-              <span style={{color:i.tur==='borc_odeme'?'#4ade80':'#f87171',fontWeight:700,fontSize:14}}>{i.tur==='borc_odeme'?'+':'-'}{fmtUSD(i.usd)}</span>
+              <span style={{color:i.tur==='borc_odeme'?'#4ade80':'#f87171',fontWeight:700,fontSize:13}}>{i.tur==='borc_odeme'?'+':'-'}{fmtUSD(i.usd)}</span>
             </div>
           ))
         }
-      </div>
-
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,paddingBottom:8}}>
-        <button onClick={()=>onPage('karPayi')} style={{background:'rgba(120,53,15,0.2)',border:'1px solid rgba(245,158,11,0.3)',borderRadius:16,padding:16,textAlign:'left',cursor:'pointer'}}>
-          <div style={{fontSize:28,marginBottom:4}}>💰</div>
-          <div style={{color:'#f59e0b',fontWeight:700,fontSize:14}}>Kâr Payı Gir</div>
-        </button>
-        <button onClick={()=>onPage('cekme')} style={{background:'rgba(30,41,59,0.5)',border:'1px solid rgba(51,65,85,0.5)',borderRadius:16,padding:16,textAlign:'left',cursor:'pointer'}}>
-          <div style={{fontSize:28,marginBottom:4}}>💸</div>
-          <div style={{color:'#cbd5e1',fontWeight:700,fontSize:14}}>Para Çek / Harca</div>
-        </button>
       </div>
     </div>
   );
 }
 
-// ── KÂR PAYI ──────────────────────────────────────────────────────────────────
+// ── KÂR PAYI ─────────────────────────────────────────────────────────────────
 function KarPayi({ state, dispatch }) {
-  const [form, setForm] = useState({ tarih:todayStr(), iqd:'', kur:'', not:'' });
-  const [confirm, setConfirm] = useState(null);
   const [show, setShow] = useState(false);
+  const [confirm, setConfirm] = useState(null);
+  const [form, setForm] = useState({tarih:todayStr(),iqd:'',kur:'',not:''});
   const parseN = s => parseFloat((s||'').replace(/\./g,'').replace(',','.'));
-  const usd = form.iqd&&form.kur ? (parseN(form.iqd)/parseN(form.kur)).toFixed(2) : null;
+  const usd = form.iqd&&form.kur?(parseN(form.iqd)/parseN(form.kur)).toFixed(2):null;
 
   const submit = () => {
-    if(!form.iqd||!form.kur) return alert('IQD tutar ve kur zorunludur.');
-    const iqd = parseN(form.iqd), kur = parseN(form.kur);
-    if(isNaN(iqd)||isNaN(kur)||kur===0) return alert('Geçerli değer girin.');
-    dispatch({ type:'ADD_KAR', payload:{ id:uid(), tarih:form.tarih, iqd, kur, usd:iqd/kur, not:form.not } });
-    setForm({ tarih:todayStr(), iqd:'', kur:'', not:'' });
+    const iqd=parseN(form.iqd),kur=parseN(form.kur);
+    if(!iqd||!kur||kur===0) return alert('IQD tutar ve kur zorunludur.');
+    dispatch({type:'ADD_KAR',payload:{id:uid(),tarih:form.tarih,iqd,kur,usd:iqd/kur,not:form.not}});
+    setForm({tarih:todayStr(),iqd:'',kur:'',not:''});
     setShow(false);
   };
 
@@ -275,35 +294,39 @@ function KarPayi({ state, dispatch }) {
     <div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
         <span style={{fontSize:18,fontWeight:800,color:'#f1f5f9'}}>Kâr Payları</span>
-        <button onClick={()=>setShow(true)} style={{background:'#f59e0b',color:'#0f172a',fontWeight:800,padding:'8px 18px',borderRadius:12,border:'none',cursor:'pointer',fontSize:14}}>+ Ekle</button>
+        <button onClick={()=>setShow(true)} style={{background:'linear-gradient(135deg,#166534,#15803d)',color:'white',fontWeight:700,padding:'8px 18px',borderRadius:12,border:'none',cursor:'pointer',fontSize:13}}>+ Ekle</button>
       </div>
+
       {(state.karPaylari||[]).length===0
-        ? <div style={{color:'#475569',textAlign:'center',padding:'48px 0'}}>Henüz kâr payı kaydı yok</div>
+        ? <div style={{color:'#252535',textAlign:'center',padding:'60px 0',fontSize:14}}>Henüz kâr payı kaydı yok</div>
         : [...(state.karPaylari||[])].sort((a,b)=>b.tarih.localeCompare(a.tarih)).map(k=>(
-          <div key={k.id} style={{background:'rgba(30,41,59,0.6)',border:'1px solid rgba(51,65,85,0.5)',borderRadius:16,padding:16,marginBottom:12}}>
-            <div style={{display:'flex',justifyContent:'space-between'}}>
+          <div key={k.id} style={{background:'rgba(16,16,26,0.9)',border:'1px solid #1e1e30',borderRadius:18,padding:16,marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
               <div>
-                <div style={{color:'#64748b',fontSize:12,marginBottom:4}}>{fmtDate(k.tarih)}</div>
-                <div style={{color:'#4ade80',fontWeight:800,fontSize:20}}>{fmtUSD(k.usd)}</div>
-                <div style={{color:'#64748b',fontSize:13,marginTop:2}}>{fmtIQD(k.iqd)} · Kur: {k.kur}</div>
-                {k.not&&<div style={{color:'#64748b',fontSize:12,marginTop:4}}>{k.not}</div>}
+                <div style={{fontSize:10,color:'#475569',marginBottom:4,textTransform:'uppercase',letterSpacing:'0.08em'}}>{fmtDate(k.tarih)}</div>
+                <div style={{color:'#4ade80',fontWeight:800,fontSize:24,letterSpacing:'-0.02em'}}>{fmtUSD(k.usd)}</div>
+                <div style={{color:'#334155',fontSize:12,marginTop:3}}>{fmtIQD(k.iqd)} · Kur: {k.kur}</div>
+                {k.not&&<div style={{color:'#475569',fontSize:12,marginTop:4}}>{k.not}</div>}
               </div>
-              <button onClick={()=>setConfirm(k.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#475569',padding:4}}>🗑</button>
+              <button onClick={()=>setConfirm(k.id)} style={{background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.15)',borderRadius:10,cursor:'pointer',color:'#f87171',fontSize:16,padding:'6px 10px'}}>🗑</button>
             </div>
           </div>
         ))
       }
+
       {show&&(
-        <Modal title="Kâr Payı Ekle" onClose={()=>setShow(false)}>
+        <Modal title="💰 Kâr Payı Ekle" onClose={()=>setShow(false)}>
           <Field label="Tarih"><input type="date" style={IS} value={form.tarih} onChange={e=>setForm({...form,tarih:e.target.value})}/></Field>
           <Field label="Tutar (IQD)"><input type="text" inputMode="numeric" style={IS} placeholder="1250000" value={form.iqd} onChange={e=>setForm({...form,iqd:e.target.value})}/></Field>
           <Field label="USD/IQD Kuru"><input type="text" inputMode="numeric" style={IS} placeholder="1480" value={form.kur} onChange={e=>setForm({...form,kur:e.target.value})}/></Field>
-          {usd&&<div style={{background:'rgba(120,53,15,0.2)',border:'1px solid rgba(245,158,11,0.3)',borderRadius:12,padding:12,marginBottom:16,textAlign:'center'}}>
-            <span style={{color:'#94a3b8',fontSize:14}}>USD Karşılığı: </span>
-            <span style={{color:'#f59e0b',fontWeight:800,fontSize:18}}>{fmtUSD(usd)}</span>
-          </div>}
+          {usd&&(
+            <div style={{background:'rgba(74,222,128,0.06)',border:'1px solid rgba(74,222,128,0.2)',borderRadius:12,padding:14,marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{color:'#64748b',fontSize:13}}>USD Karşılığı</span>
+              <span style={{color:'#4ade80',fontWeight:800,fontSize:20}}>{fmtUSD(usd)}</span>
+            </div>
+          )}
           <Field label="Not (opsiyonel)"><input type="text" style={IS} placeholder="Açıklama..." value={form.not} onChange={e=>setForm({...form,not:e.target.value})}/></Field>
-          <button onClick={submit} style={{width:'100%',background:'#f59e0b',color:'#0f172a',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
+          <button onClick={submit} style={{width:'100%',background:'linear-gradient(135deg,#166534,#15803d)',color:'white',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
         </Modal>
       )}
       {confirm&&<Confirm msg="Bu kâr payı kaydını silmek istediğinize emin misiniz?" onYes={()=>{dispatch({type:'DEL_KAR',payload:confirm});setConfirm(null);}} onNo={()=>setConfirm(null)}/>}
@@ -311,56 +334,59 @@ function KarPayi({ state, dispatch }) {
   );
 }
 
-// ── PARA ÇEKME ────────────────────────────────────────────────────────────────
+// ── PARA ÇEKME ───────────────────────────────────────────────────────────────
 function Cekme({ state, dispatch }) {
-  const [form, setForm] = useState({ tarih:todayStr(), kisi:'Mücahit', tur:'harcama', parabirimi:'USD', miktar:'', aciklama:'' });
   const [show, setShow] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [form, setForm] = useState({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',aciklama:''});
 
   const submit = () => {
-    if(!form.miktar||!form.aciklama) return alert('Tutar ve açıklama zorunludur.');
-    const miktar = parseFloat(form.miktar.replace(',','.'));
-    if(isNaN(miktar)||miktar<=0) return alert('Geçerli bir tutar girin.');
-    if(form.tur==='borc_odeme') {
-      const mevcutBorc = (state.borclar||{})[form.kisi]?.toplam||0;
-      const odemeUSD = form.parabirimi==='USD' ? miktar : miktar/1480;
-      if(odemeUSD > mevcutBorc+0.01) return alert(`${form.kisi} kişisinin mevcut borcu ${fmtUSD(mevcutBorc)} — bu tutardan fazla ödeme yapılamaz.`);
+    const miktar=parseFloat(form.miktar.replace(',','.'));
+    if(!miktar||miktar<=0) return alert('Geçerli tutar girin.');
+    if(!form.aciklama) return alert('Açıklama zorunludur.');
+    if(form.tur==='borc_odeme'){
+      const mevcutBorc=(state.borclar||{})[form.kisi]?.toplam||0;
+      const odemeUSD=form.parabirimi==='USD'?miktar:miktar/1480;
+      if(odemeUSD>mevcutBorc+0.01) return alert(`${form.kisi} kişisinin mevcut borcu ${fmtUSD(mevcutBorc)}`);
     }
-    dispatch({ type:'ADD_ISLEM', payload:{ id:uid(), tarih:form.tarih, kisi:form.kisi, tur:form.tur, parabirimi:form.parabirimi, miktar, aciklama:form.aciklama }});
-    setForm({ tarih:todayStr(), kisi:'Mücahit', tur:'harcama', parabirimi:'USD', miktar:'', aciklama:'' });
+    dispatch({type:'ADD_ISLEM',payload:{id:uid(),tarih:form.tarih,kisi:form.kisi,tur:form.tur,parabirimi:form.parabirimi,miktar,aciklama:form.aciklama}});
+    setForm({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',aciklama:''});
     setShow(false);
   };
+
+  const sorted=[...(state.islemler||[])].sort((a,b)=>b.tarih.localeCompare(a.tarih));
+
+  const pbBtn = (pb) => (
+    <button onClick={()=>setForm({...form,parabirimi:pb})}
+      style={{flex:1,padding:'11px',borderRadius:12,border:`1px solid ${form.parabirimi===pb?'#818cf8':'#2d2d45'}`,background:form.parabirimi===pb?'rgba(129,140,248,0.15)':'transparent',color:form.parabirimi===pb?'#818cf8':'#64748b',fontWeight:700,cursor:'pointer',fontSize:15}}>
+      {pb}
+    </button>
+  );
 
   return (
     <div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
         <span style={{fontSize:18,fontWeight:800,color:'#f1f5f9'}}>Çekim / Harcama</span>
-        <button onClick={()=>setShow(true)} style={{background:'#f59e0b',color:'#0f172a',fontWeight:800,padding:'8px 18px',borderRadius:12,border:'none',cursor:'pointer',fontSize:14}}>+ Ekle</button>
+        <button onClick={()=>setShow(true)} style={{background:'linear-gradient(135deg,#4338ca,#6366f1)',color:'white',fontWeight:700,padding:'8px 18px',borderRadius:12,border:'none',cursor:'pointer',fontSize:13}}>+ Ekle</button>
       </div>
-      {(state.islemler||[]).length===0
-        ? <div style={{color:'#475569',textAlign:'center',padding:'48px 0'}}>Henüz işlem yok</div>
-        : [...(state.islemler||[])].sort((a,b)=>b.tarih.localeCompare(a.tarih)).map(i=>(
-          <div key={i.id} style={{background:'rgba(30,41,59,0.6)',border:'1px solid rgba(51,65,85,0.5)',borderRadius:16,padding:16,marginBottom:12}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
-              <div style={{flex:1}}>
-                <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:4,flexWrap:'wrap'}}><TurBadge tur={i.tur}/><span style={{color:'#cbd5e1',fontWeight:600}}>{i.kisi}</span></div>
-                <div style={{color:'#64748b',fontSize:12,marginBottom:4}}>{fmtDate(i.tarih)}</div>
-                <div style={{color:'#f87171',fontWeight:800,fontSize:18}}>{fmtUSD(i.usd)}</div>
-                <div style={{color:'#94a3b8',fontSize:13,marginTop:2}}>{i.aciklama}</div>
-                <div style={{color:'#475569',fontSize:11,marginTop:2}}>Kasa: {fmtUSD(i.kasaBakiye)}</div>
-              </div>
-              <button onClick={()=>setConfirm(i.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#475569',padding:4}}>🗑</button>
-            </div>
-          </div>
-        ))
+
+      {sorted.length===0
+        ? <div style={{color:'#252535',textAlign:'center',padding:'60px 0',fontSize:14}}>Henüz işlem yok</div>
+        : sorted.map(i=><IslemKart key={i.id} i={i} onSil={()=>setConfirm(i.id)}/>)
       }
+
       {show&&(
-        <Modal title="İşlem Ekle" onClose={()=>setShow(false)}>
+        <Modal title="💸 İşlem Ekle" onClose={()=>setShow(false)}>
           <Field label="Tarih"><input type="date" style={IS} value={form.tarih} onChange={e=>setForm({...form,tarih:e.target.value})}/></Field>
           <Field label="Kişi">
-            <select style={IS} value={form.kisi} onChange={e=>setForm({...form,kisi:e.target.value})}>
-              {KISILER.map(k=><option key={k}>{k}</option>)}
-            </select>
+            <div style={{display:'flex',gap:8}}>
+              {KISILER.map(k=>(
+                <button key={k} onClick={()=>setForm({...form,kisi:k})}
+                  style={{flex:1,padding:'10px 4px',borderRadius:12,border:`1px solid ${form.kisi===k?'#818cf8':'#2d2d45'}`,background:form.kisi===k?'rgba(129,140,248,0.15)':'transparent',color:form.kisi===k?'#818cf8':'#64748b',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                  {k}
+                </button>
+              ))}
+            </div>
           </Field>
           <Field label="İşlem Türü">
             <select style={IS} value={form.tur} onChange={e=>setForm({...form,tur:e.target.value})}>
@@ -370,23 +396,14 @@ function Cekme({ state, dispatch }) {
             </select>
           </Field>
           {form.tur==='borc_odeme'&&(
-            <div style={{background:'rgba(120,53,15,0.15)',border:'1px solid rgba(251,146,60,0.3)',borderRadius:12,padding:12,marginBottom:16}}>
-              <span style={{color:'#fb923c',fontSize:14}}>Mevcut borç: {fmtUSD((state.borclar||{})[form.kisi]?.toplam||0)}</span>
+            <div style={{background:'rgba(251,146,60,0.08)',border:'1px solid rgba(251,146,60,0.25)',borderRadius:12,padding:12,marginBottom:14}}>
+              <span style={{color:'#fb923c',fontSize:13}}>Mevcut borç: {fmtUSD((state.borclar||{})[form.kisi]?.toplam||0)}</span>
             </div>
           )}
-          <Field label="Para Birimi">
-            <div style={{display:'flex',gap:8}}>
-              {['USD','IQD'].map(pb=>(
-                <button key={pb} onClick={()=>setForm({...form,parabirimi:pb})}
-                  style={{flex:1,padding:'12px',borderRadius:12,border:`1px solid ${form.parabirimi===pb?'#f59e0b':'#475569'}`,background:form.parabirimi===pb?'rgba(245,158,11,0.15)':'transparent',color:form.parabirimi===pb?'#f59e0b':'#94a3b8',fontWeight:700,cursor:'pointer',fontSize:15}}>
-                  {pb}
-                </button>
-              ))}
-            </div>
-          </Field>
-          <Field label={`Tutar (${form.parabirimi})`}><input type="text" inputMode="numeric" style={IS} placeholder={form.parabirimi==='IQD'?'1250000':'850'} value={form.miktar} onChange={e=>setForm({...form,miktar:e.target.value})}/></Field>
+          <Field label="Para Birimi"><div style={{display:'flex',gap:8}}>{pbBtn('USD')}{pbBtn('IQD')}</div></Field>
+          <Field label={`Tutar (${form.parabirimi})`}><input type="text" inputMode="numeric" style={IS} placeholder={form.parabirimi==='IQD'?'500000':'100'} value={form.miktar} onChange={e=>setForm({...form,miktar:e.target.value})}/></Field>
           <Field label="Açıklama"><input type="text" style={IS} placeholder="Amaç / açıklama..." value={form.aciklama} onChange={e=>setForm({...form,aciklama:e.target.value})}/></Field>
-          <button onClick={submit} style={{width:'100%',background:'#f59e0b',color:'#0f172a',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
+          <button onClick={submit} style={{width:'100%',background:'linear-gradient(135deg,#4338ca,#6366f1)',color:'white',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
         </Modal>
       )}
       {confirm&&<Confirm msg="Bu işlemi silmek istediğinize emin misiniz?" onYes={()=>{dispatch({type:'DEL_ISLEM',payload:confirm});setConfirm(null);}} onNo={()=>setConfirm(null)}/>}
@@ -394,33 +411,41 @@ function Cekme({ state, dispatch }) {
   );
 }
 
-// ── BORÇ TAKİP ────────────────────────────────────────────────────────────────
+// ── BORÇ TAKİP ───────────────────────────────────────────────────────────────
 function BorcTakip({ state }) {
   const [aktif, setAktif] = useState('Mücahit');
-  const b = (state.borclar||{})[aktif]||{toplam:0,gecmis:[]};
+  const b=(state.borclar||{})[aktif]||{toplam:0,gecmis:[]};
+
   return (
     <div>
       <div style={{fontSize:18,fontWeight:800,color:'#f1f5f9',marginBottom:16}}>Borç Takibi</div>
       <div style={{display:'flex',gap:8,marginBottom:16}}>
-        {KISILER.map(k=>(
-          <button key={k} onClick={()=>setAktif(k)}
-            style={{flex:1,padding:'10px 4px',borderRadius:12,border:`1px solid ${aktif===k?'#f59e0b':'#475569'}`,background:aktif===k?'rgba(245,158,11,0.15)':'transparent',color:aktif===k?'#f59e0b':'#94a3b8',fontWeight:700,cursor:'pointer',fontSize:13}}>
-            {k}
-          </button>
-        ))}
+        {KISILER.map(k=>{
+          const borc=(state.borclar||{})[k]?.toplam||0;
+          return (
+            <button key={k} onClick={()=>setAktif(k)}
+              style={{flex:1,padding:'10px 4px',borderRadius:14,border:`1px solid ${aktif===k?'#818cf8':'#1e1e30'}`,background:aktif===k?'rgba(129,140,248,0.15)':'rgba(16,16,26,0.8)',cursor:'pointer',textAlign:'center'}}>
+              <div style={{width:28,height:28,borderRadius:8,background:'rgba(129,140,248,0.2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:'#818cf8',margin:'0 auto 4px'}}>{k[0]}</div>
+              <div style={{color:aktif===k?'#818cf8':'#64748b',fontSize:11,fontWeight:aktif===k?700:400}}>{k}</div>
+              {borc>0&&<div style={{color:'#fb923c',fontSize:10,fontWeight:700,marginTop:2}}>{fmtUSD(borc)}</div>}
+            </button>
+          );
+        })}
       </div>
-      <div style={{borderRadius:16,padding:16,border:`1px solid ${b.toplam>0?'rgba(251,146,60,0.4)':'rgba(51,65,85,0.5)'}`,background:b.toplam>0?'rgba(120,53,15,0.15)':'rgba(30,41,59,0.4)',marginBottom:16}}>
-        <div style={{fontSize:11,color:'#64748b',marginBottom:4}}>Toplam Borç</div>
-        <div style={{fontSize:32,fontWeight:800,color:b.toplam>0?'#fb923c':'#475569'}}>{fmtUSD(b.toplam)}</div>
+
+      <div style={{borderRadius:18,padding:18,border:`1px solid ${b.toplam>0?'rgba(251,146,60,0.35)':'#1e1e30'}`,background:b.toplam>0?'linear-gradient(135deg,rgba(124,45,18,0.2),rgba(16,16,26,0.9))':'rgba(16,16,26,0.8)',marginBottom:16}}>
+        <div style={{fontSize:10,color:'#64748b',marginBottom:4,textTransform:'uppercase',letterSpacing:'0.1em'}}>Toplam Borç</div>
+        <div style={{fontSize:36,fontWeight:800,color:b.toplam>0?'#fb923c':'#252535',letterSpacing:'-0.02em'}}>{fmtUSD(b.toplam)}</div>
       </div>
+
       {b.gecmis.length===0
-        ? <div style={{color:'#475569',textAlign:'center',padding:'32px 0'}}>Borç geçmişi yok</div>
+        ? <div style={{color:'#252535',textAlign:'center',padding:'40px 0',fontSize:13}}>Borç geçmişi yok</div>
         : [...b.gecmis].reverse().map(g=>(
-          <div key={g.id} style={{background:'rgba(30,41,59,0.6)',border:'1px solid rgba(51,65,85,0.5)',borderRadius:16,padding:16,marginBottom:12}}>
-            <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:6}}><TurBadge tur={g.tur}/><span style={{color:'#64748b',fontSize:12}}>{fmtDate(g.tarih)}</span></div>
+          <div key={g.id} style={{background:'rgba(16,16,26,0.9)',border:'1px solid #1e1e30',borderRadius:16,padding:14,marginBottom:10}}>
+            <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:6}}><TurBadge tur={g.tur}/><span style={{color:'#334155',fontSize:11}}>{fmtDate(g.tarih)}</span></div>
             <div style={{color:g.tur==='borc_odeme'?'#4ade80':'#fb923c',fontWeight:800,fontSize:18}}>{g.tur==='borc_odeme'?'-':'+'}{fmtUSD(g.miktar)}</div>
-            <div style={{color:'#94a3b8',fontSize:13,marginTop:2}}>{g.aciklama}</div>
-            <div style={{color:'#475569',fontSize:11,marginTop:4}}>Kalan borç: {fmtUSD(g.kalan)}</div>
+            <div style={{color:'#64748b',fontSize:12,marginTop:2}}>{g.aciklama}</div>
+            <div style={{color:'#252535',fontSize:11,marginTop:4}}>Kalan: {fmtUSD(g.kalan)}</div>
           </div>
         ))
       }
@@ -429,55 +454,57 @@ function BorcTakip({ state }) {
 }
 
 // ── GEÇMİŞ ───────────────────────────────────────────────────────────────────
-function Gecmis({ state }) {
+function Gecmis({ state, dispatch }) {
   const [filKisi, setFilKisi] = useState('Tümü');
   const [filTur, setFilTur] = useState('Tümü');
-  const tumIslemler = [
-    ...(state.karPaylari||[]).map(k=>({...k,tur:'kar',kisi:'—'})),
+  const [confirm, setConfirm] = useState(null);
+  const aylar=[...new Set([...(state.karPaylari||[]).map(k=>k.tarih.slice(0,7)),...(state.islemler||[]).map(i=>i.tarih.slice(0,7))])].sort().reverse();
+  const [filAy, setFilAy] = useState(thisMonth());
+
+  const tumIslemler=[
+    ...(state.karPaylari||[]).map(k=>({...k,tur:'kar',kisi:'—',aciklama:k.not})),
     ...(state.islemler||[])
-  ].sort((a,b)=>b.tarih.localeCompare(a.tarih));
-  const filtered = tumIslemler.filter(i=>{
-    if(filKisi!=='Tümü'&&i.kisi!==filKisi) return false;
-    if(filTur!=='Tümü'&&i.tur!==filTur) return false;
-    return true;
-  });
-  const chip = (label,active,onClick) => (
-    <button onClick={onClick} style={{flexShrink:0,padding:'6px 12px',borderRadius:8,border:`1px solid ${active?'#f59e0b':'#475569'}`,background:active?'rgba(245,158,11,0.15)':'transparent',color:active?'#f59e0b':'#94a3b8',fontWeight:600,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+  ].filter(i=>i.tarih.startsWith(filAy)&&(filKisi==='Tümü'||i.kisi===filKisi)&&(filTur==='Tümü'||i.tur===filTur))
+  .sort((a,b)=>b.tarih.localeCompare(a.tarih));
+
+  const chip=(label,active,onClick)=>(
+    <button onClick={onClick} style={{flexShrink:0,padding:'5px 12px',borderRadius:8,border:`1px solid ${active?'#818cf8':'#1e1e30'}`,background:active?'rgba(129,140,248,0.15)':'transparent',color:active?'#818cf8':'#475569',fontWeight:active?700:400,cursor:'pointer',fontSize:11,whiteSpace:'nowrap'}}>
       {label}
     </button>
   );
+
   return (
     <div>
-      <div style={{fontSize:18,fontWeight:800,color:'#f1f5f9',marginBottom:16}}>İşlem Geçmişi</div>
+      <div style={{fontSize:18,fontWeight:800,color:'#f1f5f9',marginBottom:14}}>İşlem Geçmişi</div>
+      <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:8,marginBottom:8}}>
+        {aylar.length===0?chip(monthLabel(thisMonth()),true,()=>{}):aylar.map(ay=>chip(monthLabel(ay),filAy===ay,()=>setFilAy(ay)))}
+      </div>
       <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:8,marginBottom:8}}>
         {chip('Tümü',filKisi==='Tümü',()=>setFilKisi('Tümü'))}
         {KISILER.map(k=>chip(k,filKisi===k,()=>setFilKisi(k)))}
       </div>
-      <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:8,marginBottom:16}}>
-        {[['Tümü','Tümü'],['kar','Kâr Payı'],['harcama','Harcama'],['borc','Borç'],['borc_odeme','Borç Öd.']].map(([v,l])=>chip(l,filTur===v,()=>setFilTur(v)))}
+      <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:8,marginBottom:14}}>
+        {[['Tümü','Tümü'],['kar','Kâr Payı'],['harcama','Harcama'],['borc','Borç'],['borc_odeme','Ödeme']].map(([v,l])=>chip(l,filTur===v,()=>setFilTur(v)))}
       </div>
-      {filtered.length===0
-        ? <div style={{color:'#475569',textAlign:'center',padding:'48px 0'}}>Kayıt bulunamadı</div>
-        : filtered.map(i=>(
-          <div key={i.id} style={{background:'rgba(30,41,59,0.6)',border:'1px solid rgba(51,65,85,0.5)',borderRadius:16,padding:16,marginBottom:12}}>
-            <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:4,flexWrap:'wrap'}}><TurBadge tur={i.tur}/>{i.kisi!=='—'&&<span style={{color:'#cbd5e1',fontSize:13,fontWeight:600}}>{i.kisi}</span>}<span style={{color:'#475569',fontSize:12}}>{fmtDate(i.tarih)}</span></div>
-            <div style={{color:i.tur==='kar'||i.tur==='borc_odeme'?'#4ade80':'#f87171',fontWeight:800,fontSize:18}}>{i.tur==='kar'||i.tur==='borc_odeme'?'+':'-'}{fmtUSD(i.usd)}</div>
-            {(i.not||i.aciklama)&&<div style={{color:'#94a3b8',fontSize:13,marginTop:2}}>{i.not||i.aciklama}</div>}
-            {i.kasaBakiye!==undefined&&<div style={{color:'#475569',fontSize:11,marginTop:4}}>Kasa: {fmtUSD(i.kasaBakiye)}</div>}
-          </div>
+
+      {tumIslemler.length===0
+        ? <div style={{color:'#252535',textAlign:'center',padding:'48px 0',fontSize:14}}>Kayıt bulunamadı</div>
+        : tumIslemler.map(i=>(
+          <IslemKart key={i.id} i={i} onSil={i.tur==='kar'?()=>setConfirm({id:i.id,tur:'kar'}):()=>setConfirm({id:i.id,tur:'islem'})}/>
         ))
       }
+      {confirm&&<Confirm msg="Bu kaydı silmek istediğinize emin misiniz?" onYes={()=>{dispatch({type:confirm.tur==='kar'?'DEL_KAR':'DEL_ISLEM',payload:confirm.id});setConfirm(null);}} onNo={()=>setConfirm(null)}/>}
     </div>
   );
 }
 
-// ── APP ───────────────────────────────────────────────────────────────────────
-const NAV = [
-  { key:'dashboard', icon:'⊞', label:'Özet' },
-  { key:'karPayi',   icon:'💰', label:'Kâr Payı' },
-  { key:'cekme',     icon:'💸', label:'Çekim' },
-  { key:'borcTakip', icon:'📋', label:'Borç' },
-  { key:'gecmis',    icon:'🕐', label:'Geçmiş' },
+// ── APP ──────────────────────────────────────────────────────────────────────
+const NAV=[
+  {key:'dashboard',icon:'⊞',label:'Özet'},
+  {key:'karPayi',icon:'💰',label:'Kâr Payı'},
+  {key:'cekme',icon:'💸',label:'Çekim'},
+  {key:'borcTakip',icon:'📋',label:'Borç'},
+  {key:'gecmis',icon:'🕐',label:'Geçmiş'},
 ];
 
 function App() {
@@ -485,92 +512,146 @@ function App() {
   const [page, setPage] = useState('dashboard');
   const [synced, setSynced] = useState(false);
   const [fbReady, setFbReady] = useState(!!window.__firebaseReady);
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  const [modal, setModal] = useState(null);
 
-  useEffect(() => {
-    if(window.__firebaseReady) { setFbReady(true); return; }
-    const handler = () => setFbReady(true);
-    window.addEventListener('firebaseReady', handler);
-    return () => window.removeEventListener('firebaseReady', handler);
-  }, []);
+  useEffect(()=>{
+    if(window.__firebaseReady){setFbReady(true);return;}
+    const h=()=>setFbReady(true);
+    window.addEventListener('firebaseReady',h);
+    return ()=>window.removeEventListener('firebaseReady',h);
+  },[]);
 
-  useEffect(() => {
+  useEffect(()=>{
     if(!fbReady) return;
-    const unsub = window.__firebase.listen((data) => {
-      if(data) {
-        // normalize arrays (Firebase stores arrays as objects sometimes)
-        const norm = {
-          ...INITIAL,
-          ...data,
-          karPaylari: data.karPaylari ? Object.values(data.karPaylari) : [],
-          islemler: data.islemler ? Object.values(data.islemler) : [],
-          borclar: data.borclar || INITIAL.borclar,
-        };
-        setState(norm);
+    window.__firebase.listen(data=>{
+      if(data){
+        setState({
+          ...INITIAL,...data,
+          karPaylari:data.karPaylari?Object.values(data.karPaylari):[],
+          islemler:data.islemler?Object.values(data.islemler):[],
+          borclar:data.borclar||INITIAL.borclar,
+        });
       }
       setSynced(true);
     });
-    return () => {};
-  }, [fbReady]);
+  },[fbReady]);
 
-  const dispatch = useCallback((action) => {
-    setState(prev => {
-      const next = reducer(prev, action);
-      window.__firebase && window.__firebase.save(next);
+  const dispatch=useCallback((action)=>{
+    setState(prev=>{
+      const next=reducer(prev,action);
+      window.__firebase&&window.__firebase.save(next);
       return next;
     });
-  }, []);
+  },[]);
 
-  const kasaUSD = computeKasa(state);
-  const neg = kasaUSD < 0;
+  const kasaUSD=computeKasa(state);
+  const neg=kasaUSD<0;
 
   if(!synced) return (
-    <div style={{minHeight:'100vh',background:'#020617',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:12}}>
-      <div style={{fontSize:36}}>🏦</div>
-      <div style={{color:'#f59e0b',fontSize:16,fontWeight:700}}>Aile Kasası</div>
-      <div style={{color:'#64748b',fontSize:13}}>Firebase bağlanıyor…</div>
+    <div style={{minHeight:'100vh',background:'#080810',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16}}>
+      <div style={{width:64,height:64,borderRadius:20,background:'rgba(129,140,248,0.15)',border:'1px solid rgba(129,140,248,0.3)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:32}}>🏦</div>
+      <div style={{color:'#818cf8',fontSize:18,fontWeight:700}}>Aile Kasası</div>
+      <div style={{color:'#334155',fontSize:13}}>Bağlanıyor…</div>
     </div>
   );
 
   return (
-    <div style={{minHeight:'100vh',background:'#020617',color:'#f1f5f9'}}>
-      {/* Sticky Header */}
-      <div style={{position:'sticky',top:0,zIndex:40,background:'rgba(2,6,23,0.97)',backdropFilter:'blur(12px)',borderBottom:'1px solid #1e293b'}}>
-        <div style={{maxWidth:480,margin:'0 auto',padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+    <div style={{minHeight:'100vh',background:'#080810',color:'#f1f5f9'}}>
+      {/* Header */}
+      <div style={{position:'sticky',top:0,zIndex:40,background:'rgba(8,8,16,0.97)',backdropFilter:'blur(16px)',borderBottom:'1px solid #14141f'}}>
+        <div style={{maxWidth:480,margin:'0 auto',padding:'13px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <div>
-            <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:2}}>Kasa Bakiyesi</div>
-            <div style={{fontSize:22,fontWeight:800,color:neg?'#f87171':'#f59e0b',letterSpacing:'-0.02em'}}>{fmtUSD(kasaUSD)}</div>
+            <div style={{fontSize:9,color:'#334155',textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:3}}>Kasa Bakiyesi</div>
+            <div style={{fontSize:24,fontWeight:800,color:neg?'#f87171':'#818cf8',letterSpacing:'-0.02em'}}>{fmtUSD(kasaUSD)}</div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <div style={{width:8,height:8,borderRadius:'50%',background:'#22c55e',boxShadow:'0 0 6px #22c55e'}} title="Firebase bağlı"></div>
-            <div style={{width:36,height:36,borderRadius:'50%',background:'rgba(245,158,11,0.15)',border:'1px solid rgba(245,158,11,0.4)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>🏦</div>
+            <div style={{display:'flex',alignItems:'center',gap:5,background:'rgba(34,197,94,0.1)',border:'1px solid rgba(34,197,94,0.2)',borderRadius:20,padding:'4px 10px'}}>
+              <div style={{width:6,height:6,borderRadius:'50%',background:'#22c55e'}}/>
+              <span style={{color:'#22c55e',fontSize:10,fontWeight:600}}>Canlı</span>
+            </div>
+            <div style={{width:36,height:36,borderRadius:12,background:'rgba(129,140,248,0.15)',border:'1px solid rgba(129,140,248,0.25)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>🏦</div>
           </div>
         </div>
       </div>
 
-      {/* Page */}
-      <div style={{maxWidth:480,margin:'0 auto',padding:'20px 16px 100px'}}>
-        {page==='dashboard'&&<Dashboard state={state} onPage={setPage}/>}
+      <div style={{maxWidth:480,margin:'0 auto',padding:'16px 16px 100px'}}>
+        {page==='dashboard'&&<Dashboard state={state} onPage={setPage} onIslem={setModal}/>}
         {page==='karPayi'&&<KarPayi state={state} dispatch={dispatch}/>}
         {page==='cekme'&&<Cekme state={state} dispatch={dispatch}/>}
         {page==='borcTakip'&&<BorcTakip state={state}/>}
-        {page==='gecmis'&&<Gecmis state={state}/>}
+        {page==='gecmis'&&<Gecmis state={state} dispatch={dispatch}/>}
       </div>
 
       {/* Bottom Nav */}
-      <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:40,background:'rgba(15,23,42,0.97)',backdropFilter:'blur(12px)',borderTop:'1px solid #1e293b'}}>
+      <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:40,background:'rgba(8,8,16,0.97)',backdropFilter:'blur(16px)',borderTop:'1px solid #14141f'}}>
         <div style={{maxWidth:480,margin:'0 auto',display:'flex'}}>
           {NAV.map(({key,icon,label})=>(
             <button key={key} onClick={()=>setPage(key)}
-              style={{flex:1,padding:'10px 2px 12px',display:'flex',flexDirection:'column',alignItems:'center',gap:2,background:'none',border:'none',cursor:'pointer',color:page===key?'#f59e0b':'#475569'}}>
+              style={{flex:1,padding:'11px 2px 13px',display:'flex',flexDirection:'column',alignItems:'center',gap:3,background:'none',border:'none',cursor:'pointer',color:page===key?'#818cf8':'#334155',transition:'color 0.15s'}}>
               <span style={{fontSize:20,lineHeight:1}}>{icon}</span>
-              <span style={{fontSize:9,fontWeight:600,letterSpacing:'0.03em'}}>{label}</span>
+              <span style={{fontSize:9,fontWeight:page===key?700:500,letterSpacing:'0.03em'}}>{label}</span>
             </button>
           ))}
         </div>
       </div>
+
+      {/* Dashboard'dan açılan hızlı modallar */}
+      {modal==='kar'&&<KarPayiModal onClose={()=>setModal(null)} dispatch={dispatch}/>}
+      {modal==='cekme'&&<CekmeModal onClose={()=>setModal(null)} state={state} dispatch={dispatch}/>}
     </div>
+  );
+}
+
+function KarPayiModal({ onClose, dispatch }) {
+  const [form, setForm] = useState({tarih:todayStr(),iqd:'',kur:'',not:''});
+  const parseN=s=>parseFloat((s||'').replace(/\./g,'').replace(',','.'));
+  const usd=form.iqd&&form.kur?(parseN(form.iqd)/parseN(form.kur)).toFixed(2):null;
+  const submit=()=>{
+    const iqd=parseN(form.iqd),kur=parseN(form.kur);
+    if(!iqd||!kur||kur===0) return alert('IQD tutar ve kur zorunludur.');
+    dispatch({type:'ADD_KAR',payload:{id:uid(),tarih:form.tarih,iqd,kur,usd:iqd/kur,not:form.not}});
+    onClose();
+  };
+  return (
+    <Modal title="💰 Kâr Payı Ekle" onClose={onClose}>
+      <Field label="Tarih"><input type="date" style={IS} value={form.tarih} onChange={e=>setForm({...form,tarih:e.target.value})}/></Field>
+      <Field label="Tutar (IQD)"><input type="text" inputMode="numeric" style={IS} placeholder="1250000" value={form.iqd} onChange={e=>setForm({...form,iqd:e.target.value})}/></Field>
+      <Field label="USD/IQD Kuru"><input type="text" inputMode="numeric" style={IS} placeholder="1480" value={form.kur} onChange={e=>setForm({...form,kur:e.target.value})}/></Field>
+      {usd&&<div style={{background:'rgba(74,222,128,0.06)',border:'1px solid rgba(74,222,128,0.2)',borderRadius:12,padding:14,marginBottom:14,display:'flex',justifyContent:'space-between'}}><span style={{color:'#64748b',fontSize:13}}>USD Karşılığı</span><span style={{color:'#4ade80',fontWeight:800,fontSize:20}}>{fmtUSD(usd)}</span></div>}
+      <Field label="Not (opsiyonel)"><input type="text" style={IS} placeholder="Açıklama..." value={form.not} onChange={e=>setForm({...form,not:e.target.value})}/></Field>
+      <button onClick={submit} style={{width:'100%',background:'linear-gradient(135deg,#166534,#15803d)',color:'white',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
+    </Modal>
+  );
+}
+
+function CekmeModal({ onClose, state, dispatch }) {
+  const [form, setForm] = useState({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',aciklama:''});
+  const submit=()=>{
+    const miktar=parseFloat(form.miktar.replace(',','.'));
+    if(!miktar||miktar<=0) return alert('Geçerli tutar girin.');
+    if(!form.aciklama) return alert('Açıklama zorunludur.');
+    if(form.tur==='borc_odeme'){
+      const mevcutBorc=(state.borclar||{})[form.kisi]?.toplam||0;
+      const odemeUSD=form.parabirimi==='USD'?miktar:miktar/1480;
+      if(odemeUSD>mevcutBorc+0.01) return alert(`${form.kisi} kişisinin mevcut borcu ${fmtUSD(mevcutBorc)}`);
+    }
+    dispatch({type:'ADD_ISLEM',payload:{id:uid(),tarih:form.tarih,kisi:form.kisi,tur:form.tur,parabirimi:form.parabirimi,miktar,aciklama:form.aciklama}});
+    onClose();
+  };
+  const pbBtn=(pb)=>(
+    <button onClick={()=>setForm({...form,parabirimi:pb})} style={{flex:1,padding:'11px',borderRadius:12,border:`1px solid ${form.parabirimi===pb?'#818cf8':'#2d2d45'}`,background:form.parabirimi===pb?'rgba(129,140,248,0.15)':'transparent',color:form.parabirimi===pb?'#818cf8':'#64748b',fontWeight:700,cursor:'pointer',fontSize:15}}>{pb}</button>
+  );
+  return (
+    <Modal title="💸 İşlem Ekle" onClose={onClose}>
+      <Field label="Tarih"><input type="date" style={IS} value={form.tarih} onChange={e=>setForm({...form,tarih:e.target.value})}/></Field>
+      <Field label="Kişi"><div style={{display:'flex',gap:8}}>{KISILER.map(k=><button key={k} onClick={()=>setForm({...form,kisi:k})} style={{flex:1,padding:'10px 4px',borderRadius:12,border:`1px solid ${form.kisi===k?'#818cf8':'#2d2d45'}`,background:form.kisi===k?'rgba(129,140,248,0.15)':'transparent',color:form.kisi===k?'#818cf8':'#64748b',fontWeight:700,cursor:'pointer',fontSize:12}}>{k}</button>)}</div></Field>
+      <Field label="İşlem Türü"><select style={IS} value={form.tur} onChange={e=>setForm({...form,tur:e.target.value})}><option value="harcama">Harcama</option><option value="borc">Borç</option><option value="borc_odeme">Borç Ödemesi</option></select></Field>
+      {form.tur==='borc_odeme'&&<div style={{background:'rgba(251,146,60,0.08)',border:'1px solid rgba(251,146,60,0.25)',borderRadius:12,padding:12,marginBottom:14}}><span style={{color:'#fb923c',fontSize:13}}>Mevcut borç: {fmtUSD((state.borclar||{})[form.kisi]?.toplam||0)}</span></div>}
+      <Field label="Para Birimi"><div style={{display:'flex',gap:8}}>{pbBtn('USD')}{pbBtn('IQD')}</div></Field>
+      <Field label={`Tutar (${form.parabirimi})`}><input type="text" inputMode="numeric" style={IS} placeholder={form.parabirimi==='IQD'?'500000':'100'} value={form.miktar} onChange={e=>setForm({...form,miktar:e.target.value})}/></Field>
+      <Field label="Açıklama"><input type="text" style={IS} placeholder="Amaç / açıklama..." value={form.aciklama} onChange={e=>setForm({...form,aciklama:e.target.value})}/></Field>
+      <button onClick={submit} style={{width:'100%',background:'linear-gradient(135deg,#4338ca,#6366f1)',color:'white',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
+    </Modal>
   );
 }
 
