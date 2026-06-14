@@ -525,11 +525,19 @@ function App() {
     if(!fbReady) return;
     window.__firebase.listen(data=>{
       if(data){
+        const normBorclar = {};
+        KISILER.forEach(k => {
+          const b = data.borclar?.[k] || {toplam:0,gecmis:[]};
+          normBorclar[k] = {
+            toplam: b.toplam||0,
+            gecmis: b.gecmis ? (Array.isArray(b.gecmis) ? b.gecmis : Object.values(b.gecmis)) : []
+          };
+        });
         setState({
           ...INITIAL,...data,
-          karPaylari:data.karPaylari?Object.values(data.karPaylari):[],
-          islemler:data.islemler?Object.values(data.islemler):[],
-          borclar:data.borclar||INITIAL.borclar,
+          karPaylari:data.karPaylari?(Array.isArray(data.karPaylari)?data.karPaylari:Object.values(data.karPaylari)):[],
+          islemler:data.islemler?(Array.isArray(data.islemler)?data.islemler:Object.values(data.islemler)):[],
+          borclar:normBorclar,
         });
       }
       setSynced(true);
