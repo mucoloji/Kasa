@@ -54,6 +54,34 @@ const thisMonth = () => { const n=new Date(); return `${n.getFullYear()}-${Strin
 const monthLabel = ym => { if(!ym) return ''; const [y,m]=ym.split('-'); const names=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']; return names[parseInt(m)-1]+' '+y; };
 const KISILER = ['Mücahit','Münir','Baba'];
 
+// Evrensel sayı girişi — hem IQD hem USD için otomatik binlik noktalama
+function NumInput({ value, onChange, placeholder, decimal }) {
+  const handleChange = e => {
+    let raw = e.target.value;
+    if(decimal) {
+      raw = raw.replace(/[^0-9,]/g,"");
+      const parts = raw.split(",");
+      if(parts.length>2) raw = parts[0]+","+ parts.slice(1).join("");
+      onChange(raw);
+    } else {
+      raw = raw.replace(/[^0-9]/g,"");
+      if(!raw) { onChange(""); return; }
+      onChange(parseInt(raw,10).toLocaleString("tr-TR"));
+    }
+  };
+  return (
+    <input type="text" inputMode="numeric" style={IS}
+      placeholder={placeholder||(decimal?"1.250,00":"6.895.650")}
+      value={value}
+      onChange={handleChange}
+    />
+  );
+}
+function IQDInput({ value, onChange, placeholder }) {
+  return <NumInput value={value} onChange={onChange} placeholder={placeholder||"6.895.650"} decimal={false}/>;
+}
+const parseNum = s => parseFloat((s||"").replace(/\./g,"").replace(",",".")) || 0;
+
 const INITIAL = {
   karPaylari: [],
   islemler: [],
@@ -74,8 +102,9 @@ function reducer(state, action) {
     case 'DEL_KAR': return { ...state, karPaylari:(state.karPaylari||[]).filter(k=>k.id!==action.payload) };
     case 'ADD_ISLEM': {
       const { id,tarih,kisi,tur,parabirimi,miktar,aciklama } = action.payload;
-      const usd = parabirimi==='USD'?miktar:miktar/1480;
-      const iqd = parabirimi==='IQD'?miktar:miktar*1480;
+      const _kur = action.payload.kur||1480;
+      const usd = parabirimi==='USD'?miktar:miktar/_kur;
+      const iqd = parabirimi==='IQD'?miktar:miktar*_kur;
       const girenUSD=(state.karPaylari||[]).reduce((s,k)=>s+k.usd,0);
       const cikanUSD=(state.islemler||[]).filter(i=>i.tur!=='borc_odeme').reduce((s,i)=>s+i.usd,0);
       const kasaBakiye=girenUSD-cikanUSD-(tur!=='borc_odeme'?usd:0);
@@ -279,7 +308,7 @@ function KarPayi({ state, dispatch }) {
   const [show, setShow] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [form, setForm] = useState({tarih:todayStr(),iqd:'',kur:'',not:''});
-  const parseN = s => parseFloat((s||'').replace(/\./g,'').replace(',','.'));
+  const parseN = s => parseNum(s);
   const usd = form.iqd&&form.kur?(parseN(form.iqd)/parseN(form.kur)).toFixed(2):null;
 
   const submit = () => {
@@ -317,8 +346,8 @@ function KarPayi({ state, dispatch }) {
       {show&&(
         <Modal title="💰 Kâr Payı Ekle" onClose={()=>setShow(false)}>
           <Field label="Tarih"><input type="date" style={IS} value={form.tarih} onChange={e=>setForm({...form,tarih:e.target.value})}/></Field>
-          <Field label="Tutar (IQD)"><input type="text" inputMode="numeric" style={IS} placeholder="1250000" value={form.iqd} onChange={e=>setForm({...form,iqd:e.target.value})}/></Field>
-          <Field label="USD/IQD Kuru"><input type="text" inputMode="numeric" style={IS} placeholder="1480" value={form.kur} onChange={e=>setForm({...form,kur:e.target.value})}/></Field>
+          <Field label="Tutar (IQD)"><IQDInput value={form.iqd} onChange={v=>setForm({...form,iqd:v})}/></Field>
+          <Field label="USD/IQD Kuru"><NumInput value={form.kur} onChange={v=>setForm({...form,kur:v})} placeholder="1.480" decimal={false}/></Field>
           {usd&&(
             <div style={{background:'rgba(74,222,128,0.06)',border:'1px solid rgba(74,222,128,0.2)',borderRadius:12,padding:14,marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <span style={{color:'#64748b',fontSize:13}}>USD Karşılığı</span>
@@ -338,19 +367,20 @@ function KarPayi({ state, dispatch }) {
 function Cekme({ state, dispatch }) {
   const [show, setShow] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',aciklama:''});
+  const [form, setForm] = useState({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',kur:'1.480',aciklama:''});
 
   const submit = () => {
-    const miktar=parseFloat(form.miktar.replace(',','.'));
+    const miktar=parseNum(form.miktar);
+    const kur=parseNum(form.kur)||1480;
     if(!miktar||miktar<=0) return alert('Geçerli tutar girin.');
     if(!form.aciklama) return alert('Açıklama zorunludur.');
     if(form.tur==='borc_odeme'){
       const mevcutBorc=(state.borclar||{})[form.kisi]?.toplam||0;
-      const odemeUSD=form.parabirimi==='USD'?miktar:miktar/1480;
+      const odemeUSD=form.parabirimi==='USD'?miktar:miktar/kur;
       if(odemeUSD>mevcutBorc+0.01) return alert(`${form.kisi} kişisinin mevcut borcu ${fmtUSD(mevcutBorc)}`);
     }
-    dispatch({type:'ADD_ISLEM',payload:{id:uid(),tarih:form.tarih,kisi:form.kisi,tur:form.tur,parabirimi:form.parabirimi,miktar,aciklama:form.aciklama}});
-    setForm({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',aciklama:''});
+    dispatch({type:'ADD_ISLEM',payload:{id:uid(),tarih:form.tarih,kisi:form.kisi,tur:form.tur,parabirimi:form.parabirimi,miktar,kur,aciklama:form.aciklama}});
+    setForm({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',kur:'1.480',aciklama:''});
     setShow(false);
   };
 
@@ -401,7 +431,13 @@ function Cekme({ state, dispatch }) {
             </div>
           )}
           <Field label="Para Birimi"><div style={{display:'flex',gap:8}}>{pbBtn('USD')}{pbBtn('IQD')}</div></Field>
-          <Field label={`Tutar (${form.parabirimi})`}><input type="text" inputMode="numeric" style={IS} placeholder={form.parabirimi==='IQD'?'500000':'100'} value={form.miktar} onChange={e=>setForm({...form,miktar:e.target.value})}/></Field>
+          <Field label={`Tutar (${form.parabirimi})`}>{form.parabirimi==='IQD'?<IQDInput value={form.miktar} onChange={v=>setForm({...form,miktar:v})} placeholder="500.000"/>:<NumInput value={form.miktar} onChange={v=>setForm({...form,miktar:v})} placeholder="100" decimal={true}/>}</Field>
+          {form.parabirimi==='IQD'&&(
+            <div>
+              <Field label="USD/IQD Kuru"><NumInput value={form.kur} onChange={v=>setForm({...form,kur:v})} placeholder="1.480" decimal={false}/></Field>
+              {form.miktar&&form.kur&&<div style={{background:'rgba(129,140,248,0.08)',border:'1px solid rgba(129,140,248,0.2)',borderRadius:12,padding:12,marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{color:'#64748b',fontSize:13}}>USD Karşılığı</span><span style={{color:'#818cf8',fontWeight:800,fontSize:16}}>{fmtUSD(parseNum(form.miktar)/(parseNum(form.kur)||1480))}</span></div>}
+            </div>
+          )}
           <Field label="Açıklama"><input type="text" style={IS} placeholder="Amaç / açıklama..." value={form.aciklama} onChange={e=>setForm({...form,aciklama:e.target.value})}/></Field>
           <button onClick={submit} style={{width:'100%',background:'linear-gradient(135deg,#4338ca,#6366f1)',color:'white',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
         </Modal>
@@ -414,7 +450,9 @@ function Cekme({ state, dispatch }) {
 // ── BORÇ TAKİP ───────────────────────────────────────────────────────────────
 function BorcTakip({ state }) {
   const [aktif, setAktif] = useState('Mücahit');
-  const b=(state.borclar||{})[aktif]||{toplam:0,gecmis:[]};
+  const raw=(state.borclar||{})[aktif]||{};
+  const gecmisRaw=raw.gecmis||[];
+  const b={ toplam:raw.toplam||0, gecmis:Array.isArray(gecmisRaw)?gecmisRaw:Object.values(gecmisRaw) };
 
   return (
     <div>
@@ -612,7 +650,7 @@ function App() {
 
 function KarPayiModal({ onClose, dispatch }) {
   const [form, setForm] = useState({tarih:todayStr(),iqd:'',kur:'',not:''});
-  const parseN=s=>parseFloat((s||'').replace(/\./g,'').replace(',','.'));
+  const parseN=s=>parseNum(s);
   const usd=form.iqd&&form.kur?(parseN(form.iqd)/parseN(form.kur)).toFixed(2):null;
   const submit=()=>{
     const iqd=parseN(form.iqd),kur=parseN(form.kur);
@@ -623,8 +661,8 @@ function KarPayiModal({ onClose, dispatch }) {
   return (
     <Modal title="💰 Kâr Payı Ekle" onClose={onClose}>
       <Field label="Tarih"><input type="date" style={IS} value={form.tarih} onChange={e=>setForm({...form,tarih:e.target.value})}/></Field>
-      <Field label="Tutar (IQD)"><input type="text" inputMode="numeric" style={IS} placeholder="1250000" value={form.iqd} onChange={e=>setForm({...form,iqd:e.target.value})}/></Field>
-      <Field label="USD/IQD Kuru"><input type="text" inputMode="numeric" style={IS} placeholder="1480" value={form.kur} onChange={e=>setForm({...form,kur:e.target.value})}/></Field>
+      <Field label="Tutar (IQD)"><IQDInput value={form.iqd} onChange={v=>setForm({...form,iqd:v})}/></Field>
+      <Field label="USD/IQD Kuru"><NumInput value={form.kur} onChange={v=>setForm({...form,kur:v})} placeholder="1.480" decimal={false}/></Field>
       {usd&&<div style={{background:'rgba(74,222,128,0.06)',border:'1px solid rgba(74,222,128,0.2)',borderRadius:12,padding:14,marginBottom:14,display:'flex',justifyContent:'space-between'}}><span style={{color:'#64748b',fontSize:13}}>USD Karşılığı</span><span style={{color:'#4ade80',fontWeight:800,fontSize:20}}>{fmtUSD(usd)}</span></div>}
       <Field label="Not (opsiyonel)"><input type="text" style={IS} placeholder="Açıklama..." value={form.not} onChange={e=>setForm({...form,not:e.target.value})}/></Field>
       <button onClick={submit} style={{width:'100%',background:'linear-gradient(135deg,#166534,#15803d)',color:'white',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
@@ -633,17 +671,18 @@ function KarPayiModal({ onClose, dispatch }) {
 }
 
 function CekmeModal({ onClose, state, dispatch }) {
-  const [form, setForm] = useState({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',aciklama:''});
+  const [form, setForm] = useState({tarih:todayStr(),kisi:'Mücahit',tur:'harcama',parabirimi:'USD',miktar:'',kur:'1.480',aciklama:''});
   const submit=()=>{
-    const miktar=parseFloat(form.miktar.replace(',','.'));
+    const miktar=parseNum(form.miktar);
+    const kur=parseNum(form.kur)||1480;
     if(!miktar||miktar<=0) return alert('Geçerli tutar girin.');
     if(!form.aciklama) return alert('Açıklama zorunludur.');
     if(form.tur==='borc_odeme'){
       const mevcutBorc=(state.borclar||{})[form.kisi]?.toplam||0;
-      const odemeUSD=form.parabirimi==='USD'?miktar:miktar/1480;
+      const odemeUSD=form.parabirimi==='USD'?miktar:miktar/kur;
       if(odemeUSD>mevcutBorc+0.01) return alert(`${form.kisi} kişisinin mevcut borcu ${fmtUSD(mevcutBorc)}`);
     }
-    dispatch({type:'ADD_ISLEM',payload:{id:uid(),tarih:form.tarih,kisi:form.kisi,tur:form.tur,parabirimi:form.parabirimi,miktar,aciklama:form.aciklama}});
+    dispatch({type:'ADD_ISLEM',payload:{id:uid(),tarih:form.tarih,kisi:form.kisi,tur:form.tur,parabirimi:form.parabirimi,miktar,kur,aciklama:form.aciklama}});
     onClose();
   };
   const pbBtn=(pb)=>(
@@ -656,7 +695,13 @@ function CekmeModal({ onClose, state, dispatch }) {
       <Field label="İşlem Türü"><select style={IS} value={form.tur} onChange={e=>setForm({...form,tur:e.target.value})}><option value="harcama">Harcama</option><option value="borc">Borç</option><option value="borc_odeme">Borç Ödemesi</option></select></Field>
       {form.tur==='borc_odeme'&&<div style={{background:'rgba(251,146,60,0.08)',border:'1px solid rgba(251,146,60,0.25)',borderRadius:12,padding:12,marginBottom:14}}><span style={{color:'#fb923c',fontSize:13}}>Mevcut borç: {fmtUSD((state.borclar||{})[form.kisi]?.toplam||0)}</span></div>}
       <Field label="Para Birimi"><div style={{display:'flex',gap:8}}>{pbBtn('USD')}{pbBtn('IQD')}</div></Field>
-      <Field label={`Tutar (${form.parabirimi})`}><input type="text" inputMode="numeric" style={IS} placeholder={form.parabirimi==='IQD'?'500000':'100'} value={form.miktar} onChange={e=>setForm({...form,miktar:e.target.value})}/></Field>
+      <Field label={`Tutar (${form.parabirimi})`}>{form.parabirimi==='IQD'?<IQDInput value={form.miktar} onChange={v=>setForm({...form,miktar:v})} placeholder="500.000"/>:<NumInput value={form.miktar} onChange={v=>setForm({...form,miktar:v})} placeholder="100" decimal={true}/>}</Field>
+      {form.parabirimi==='IQD'&&(
+        <div>
+          <Field label="USD/IQD Kuru"><NumInput value={form.kur} onChange={v=>setForm({...form,kur:v})} placeholder="1.480" decimal={false}/></Field>
+          {form.miktar&&form.kur&&<div style={{background:'rgba(129,140,248,0.08)',border:'1px solid rgba(129,140,248,0.2)',borderRadius:12,padding:12,marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{color:'#64748b',fontSize:13}}>USD Karşılığı</span><span style={{color:'#818cf8',fontWeight:800,fontSize:16}}>{fmtUSD(parseNum(form.miktar)/(parseNum(form.kur)||1480))}</span></div>}
+        </div>
+      )}
       <Field label="Açıklama"><input type="text" style={IS} placeholder="Amaç / açıklama..." value={form.aciklama} onChange={e=>setForm({...form,aciklama:e.target.value})}/></Field>
       <button onClick={submit} style={{width:'100%',background:'linear-gradient(135deg,#4338ca,#6366f1)',color:'white',fontWeight:800,padding:'14px',borderRadius:14,border:'none',cursor:'pointer',fontSize:16}}>Kaydet</button>
     </Modal>
